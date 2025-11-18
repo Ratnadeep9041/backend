@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
-import cors from 'cors';
+import cors from "cors"
 import { auditWebsite } from './audit';
 import { AuditRequest } from './types';
 

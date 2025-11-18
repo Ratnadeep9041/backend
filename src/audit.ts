@@ -44,15 +44,28 @@ export async function auditWebsite(url: string): Promise<AuditResponse> {
     })
   ]);
 
+  const performanceScore = Math.round(
+    (Number(desktopResults.data.lighthouseResult.categories.performance.score) * 100 +
+     Number(mobileResults.data.lighthouseResult.categories.performance.score) * 100) / 2
+  );
+  
+
   // Get average scores
-  const performanceScore = Math.round((desktopResults.data.lighthouseResult.categories.performance.score! * 100 + 
-                           mobileResults.data.lighthouseResult.categories.performance.score! * 100) / 2);
-  const accessibilityScore = Math.round((desktopResults.data.lighthouseResult.categories.accessibility.score! * 100 + 
-                             mobileResults.data.lighthouseResult.categories.accessibility.score! * 100) / 2);
-  const seoScore = Math.round((desktopResults.data.lighthouseResult.categories.seo.score! * 100 + 
-                   mobileResults.data.lighthouseResult.categories.seo.score! * 100) / 2);
-  const bestPracticesScore = Math.round((desktopResults.data.lighthouseResult.categories['best-practices'].score! * 100 + 
-                             mobileResults.data.lighthouseResult.categories['best-practices'].score! * 100) / 2);
+  const accessibilityScore = Math.round(
+    (Number(desktopResults.data.lighthouseResult.categories.accessibility.score) * 100 +
+     Number(mobileResults.data.lighthouseResult.categories.accessibility.score) * 100) / 2
+  );
+  
+  const seoScore = Math.round(
+    (Number(desktopResults.data.lighthouseResult.categories.seo.score) * 100 +
+     Number(mobileResults.data.lighthouseResult.categories.seo.score) * 100) / 2
+  );
+  
+  const bestPracticesScore = Math.round(
+    (Number(desktopResults.data.lighthouseResult.categories['best-practices'].score) * 100 +
+     Number(mobileResults.data.lighthouseResult.categories['best-practices'].score) * 100) / 2
+  );
+  
 
   const urlObj = new URL(url);
   const baseUrl = `${urlObj.protocol}//${urlObj.hostname}`;
