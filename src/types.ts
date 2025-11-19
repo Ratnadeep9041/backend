@@ -10,6 +10,13 @@ export interface AuditRequest {
       robotsTextPresent: boolean
       canonicalTagPresent: boolean
       schemaMarkup: string[]
+      schemaValidation: {
+        valid: boolean
+        errors: number
+        warnings: number
+        currentSchema: string
+        improvements: string[]
+      } | null
       statusCodes: {
         code4xx: number
         code3xx: number
@@ -55,6 +62,6 @@ export interface AuditRequest {
         title: string
         description: string
       }
-    },
-    html:string
-  }
+    }
+    html: string
+}

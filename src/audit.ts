@@ -3,6 +3,7 @@ import psi from 'psi';
 import { generateObject } from 'ai';
 import { bedrock } from '@ai-sdk/amazon-bedrock';
 import { z } from 'zod';
+import { load } from 'cheerio';
 import { AuditResponse } from "./types";
 
 const firecrawl = new Firecrawl({
@@ -23,7 +24,16 @@ const robotsValidationSchema = z.object({
   allowed: z.boolean().describe("Whether the URL is allowed by robots.txt")
 });
 
-
+const schemaImprovementSchema = z.object({
+  improvements: z.array(
+    z.object({
+      headline: z.string().describe("Concise improvement headline (max 10 words)"),
+      description: z.string().describe("Simple explanation of the improvement"),
+      priority: z.enum(['high', 'medium', 'low']).describe("Priority level based on impact")
+    })
+  ),
+  formattedSchema: z.string().describe("Properly formatted and enhanced schema markup")
+});
 
 export async function auditWebsite(url: string): Promise<AuditResponse> {
   // Run PageSpeed Insights
@@ -48,7 +58,6 @@ export async function auditWebsite(url: string): Promise<AuditResponse> {
     (Number(desktopResults.data.lighthouseResult.categories.performance.score) * 100 +
      Number(mobileResults.data.lighthouseResult.categories.performance.score) * 100) / 2
   );
-  
 
   // Get average scores
   const accessibilityScore = Math.round(
@@ -65,7 +74,6 @@ export async function auditWebsite(url: string): Promise<AuditResponse> {
     (Number(desktopResults.data.lighthouseResult.categories['best-practices'].score) * 100 +
      Number(mobileResults.data.lighthouseResult.categories['best-practices'].score) * 100) / 2
   );
-  
 
   const urlObj = new URL(url);
   const baseUrl = `${urlObj.protocol}//${urlObj.hostname}`;
@@ -98,7 +106,7 @@ Return true if the URL is allowed, false if it's disallowed. Consider all user-a
       robotsTextPresent = result.object.allowed;
     } catch (error) {
       console.error('Error validating URL with LLM:', error);
-      robotsTextPresent = true; // Default to true if error
+      robotsTextPresent = true;
     }
   }
 
@@ -118,6 +126,9 @@ Return true if the URL is allowed, false if it's disallowed. Consider all user-a
   // Extract images
   const images = extractImages(html);
 
+  // Validate and improve schema markup
+  const schemaAnalysis = await validateAndImproveSchema(url);
+
   const improvementsByCategory = await extractAuditImprovementsWithAI(
     desktopResults.data.lighthouseResult.audits,
     mobileResults.data.lighthouseResult.audits,
@@ -130,7 +141,7 @@ Return true if the URL is allowed, false if it's disallowed. Consider all user-a
     url
   );
 
-  console.log({improvedMeta, sitemapPresent, robotsTextPresent})
+  console.log({improvedMeta, sitemapPresent, robotsTextPresent, schemaAnalysis})
 
   return {
     url,
@@ -140,6 +151,7 @@ Return true if the URL is allowed, false if it's disallowed. Consider all user-a
       robotsTextPresent: !!robotsTxtContent,
       canonicalTagPresent: technical.canonicalTag.present,
       schemaMarkup: technical.schemaMarkup.types || [],
+      schemaValidation: schemaAnalysis,
       statusCodes: {
         code4xx: 0,
         code3xx: 0
@@ -201,7 +213,6 @@ async function fetchRobotsTxt(baseUrl: string): Promise<string | null> {
 
 async function discoverSitemap(baseUrl: string): Promise<string | null> {
   try {
-    // Try common sitemap locations
     const sitemapUrls = [
       `${baseUrl}/sitemap.xml`,
       `${baseUrl}/sitemap.txt`,
@@ -220,6 +231,42 @@ async function discoverSitemap(baseUrl: string): Promise<string | null> {
   return null;
 }
 
+async function validateCanonicalTag(scrapeResult: any): Promise<boolean> {
+  try {
+    const html = scrapeResult.html || '';
+    const markdown = scrapeResult.markdown || '';
+    
+    // Use LLM to analyze if canonical tag exists
+    const result = await generateObject({
+      model: bedrock('global.anthropic.claude-haiku-4-5-20251001-v1:0'),
+      schema: z.object({
+        canonicalExists: z.boolean().describe("Whether a canonical tag exists in the page")
+      }),
+      prompt: `Analyze this HTML and markdown content to determine if a canonical tag exists on the page.
+
+HTML Content:
+${html.substring(0, 2000)}
+
+Markdown Content:
+${markdown.substring(0, 2000)}
+
+Check for:
+1. <link rel="canonical" href="..."> in the HTML head
+2. Any canonical URL references
+
+Return true if a canonical tag is present, false otherwise.`
+    });
+    
+    return result.object.canonicalExists;
+  } catch (error) {
+    console.error('Error validating canonical tag:', error);
+    // Fallback to regex check
+    const html = scrapeResult.html || '';
+    const canonicalMatch = html.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
+    return !!canonicalMatch;
+  }
+}
+
 async function fetchSitemapContent(sitemapUrl: string): Promise<string | null> {
   try {
     const response = await fetch(sitemapUrl);
@@ -230,6 +277,123 @@ async function fetchSitemapContent(sitemapUrl: string): Promise<string | null> {
     console.error('Error fetching sitemap:', e);
   }
   return null;
+}
+
+async function validateAndImproveSchema(url: string) {
+  try {
+    const response = await fetch('https://validator.schema.org/validate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: `url=${encodeURIComponent(url)}`
+    });
+
+    if (!response.ok) {
+      console.error('Schema validation API error:', response.statusText);
+      return null;
+    }
+
+    const validationHtml = await response.text();
+
+    // Parse HTML with Cheerio to extract relevant data
+    const $ = load(validationHtml);
+    
+    // Extract schema information
+    const schemaScripts = $('script[type="application/ld+json"]');
+    const schemas: string[] = [];
+    schemaScripts.each((i, elem) => {
+      const content = $(elem).html();
+      if (content) {
+        schemas.push(content);
+      }
+    });
+
+    // Extract error and warning messages
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    
+    // Look for error elements
+    $('[class*="error"]').each((i, elem) => {
+      const text = $(elem).text().trim();
+      if (text && errors.length < 5) {
+        errors.push(text);
+      }
+    });
+
+    // Look for warning elements
+    $('[class*="warning"]').each((i, elem) => {
+      const text = $(elem).text().trim();
+      if (text && warnings.length < 5) {
+        warnings.push(text);
+      }
+    });
+
+    // Extract validation status
+    const validationText = $('body').text();
+    const isValid = !validationText.includes('error') && errors.length === 0;
+
+    const extractedData = {
+      schemas: schemas,
+      errors: errors,
+      warnings: warnings,
+      validationText: validationText.substring(0, 2000)
+    };
+
+    // Send the extracted content to LLM for analysis
+    try {
+      const result = await generateObject({
+        model: bedrock('global.anthropic.claude-haiku-4-5-20251001-v1:0'),
+        schema: z.object({
+          valid: z.boolean().describe("Whether the schema markup is valid"),
+          errors: z.number().describe("Number of validation errors found"),
+          warnings: z.number().describe("Number of validation warnings found"),
+          currentSchema: z.string().describe("The exact current schema markup found on the page as JSON"),
+          improvements: z.array(
+            z.string()
+          ).describe("List of specific improvements that can be made to the schema markup")
+        }),
+        prompt: `Analyze this schema.org validation data and extract key information.
+
+Extracted Schema Markup:
+${extractedData.schemas.join('\n\n')}
+
+Errors Found:
+${extractedData.errors.join('\n') || 'None'}
+
+Warnings Found:
+${extractedData.warnings.join('\n') || 'None'}
+
+Validation Text (excerpt):
+${extractedData.validationText}
+
+Extract:
+1. Whether schema is valid (true if no errors, false otherwise)
+2. Count of validation errors
+3. Count of validation warnings
+4. The exact current schema markup as valid JSON (pick the first one if multiple exist)
+5. A list of 2-3 specific improvements that can be made to enhance the schema
+
+Return the currentSchema as valid, parseable JSON and improvements as specific actionable changes.`
+      });
+
+      return {
+        valid: result.object.valid,
+        errors: result.object.errors,
+        warnings: result.object.warnings,
+        currentSchema: result.object.currentSchema,
+        improvements: result.object.improvements
+      };
+    } catch (llmError) {
+      console.error('Error analyzing schema validation with AI:', llmError);
+      return null;
+    }
+
+
+  } catch (error) {
+    console.error('Error validating schema:', error);
+    return null;
+  }
 }
 
 function extractTechnicalSeo(html: string, metaData: Record<string, string>, url: string) {
@@ -243,23 +407,22 @@ function extractTechnicalSeo(html: string, metaData: Record<string, string>, url
     url: sitemapMatch ? sitemapMatch[1] : undefined
   };
 
-  // Robots.txt (would need separate fetch in real implementation)
+  // Robots.txt
   const robotsTxt = {
-    present: true, // Assume present, would need fetch
+    present: true,
     allows: ['*']
   };
 
   // Canonical tag
-  const canonicalMatch = html.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
+  const canonicalMatch = validateCanonicalTag(html)
   
-  const canonicalTag = {
+  const canonicalTag = { 
     present: !!canonicalMatch,
-    url: canonicalMatch ? canonicalMatch[1] : undefined
+    url: undefined
   };
 
   // Schema markup
   const schemaMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
-  console.log({schemaMatches})
   const schemaTypes: string[] = [];
   if (schemaMatches) {
     schemaMatches.forEach(match => {
@@ -282,12 +445,9 @@ function extractTechnicalSeo(html: string, metaData: Record<string, string>, url
   };
 
   // Meta tags
-  const titleMatch = metaData.title;
-  const descMatch = metaData.description;
-  
   const metaTags = {
-    title: titleMatch,
-    description: descMatch
+    title: metaData.title,
+    description: metaData.description
   };
 
   return {
@@ -358,14 +518,16 @@ function extractImages(html: string) {
   let withoutAltText = 0;
 
   imgMatches.forEach(img => {
+    const srcMatch = img.match(/src=["']([^"']+)["']/i);
     const altMatch = img.match(/alt=["']([^"']*)["']/i);
+    const src = srcMatch ? srcMatch[1] : '';
     const alt = altMatch ? altMatch[1] : undefined;
 
     if (alt && alt.trim()) {
       withAltText++;
     } else {
       withoutAltText++;
-      missingAltDetails.push({ src:img, alt });
+      missingAltDetails.push({ src, alt });
     }
   });
 
@@ -383,7 +545,6 @@ async function extractAuditImprovementsWithAI(
   scores: any
 ) {
   const processCategory = async (audits: any, categoryName: string) => {
-    // Extract failing audits
     const failingAudits: Array<{ title: string; description: string; displayValue?: string }> = [];
 
     Object.entries(audits).forEach(([auditId, audit]: any) => {
@@ -429,7 +590,6 @@ async function extractAuditImprovementsWithAI(
       return result.object.improvements.map(imp => `${imp.headline} - ${imp.description}`);
     } catch (error) {
       console.error(`Error processing ${categoryName} with AI:`, error);
-      // Fallback to original extraction
       return failingAudits.slice(0, 5).map(a => `${a.title}: ${a.description}`);
     }
   };
@@ -474,17 +634,13 @@ Create an improved version that:
 - Description: Compelling, includes call-to-action, max 160 characters
 - Both should be improvements over the originals while being realistic and professional`
     });
-    console.log({
-      title: result.object.title,
-      description: result.object.description
-    })
+    
     return {
       title: result.object.title,
       description: result.object.description
     };
   } catch (error) {
     console.error('Error generating optimized meta with AI:', error);
-    // Fallback
     return {
       title: originalTitle ? `${originalTitle.substring(0, 55)}...` : 'Optimized Title',
       description: originalDescription ? `${originalDescription.substring(0, 155)}...` : 'Optimized description'
