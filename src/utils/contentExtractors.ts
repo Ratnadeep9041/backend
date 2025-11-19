@@ -175,7 +175,7 @@ export async function validateAndImproveSchema(url: string) {
         schemas.push(content);
       }
     });
-
+    console.log({schema:schemas.length})
     // Extract error and warning messages
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -202,7 +202,7 @@ export async function validateAndImproveSchema(url: string) {
       warnings: warnings,
       validationText: validationText.substring(0, 2000)
     };
-    
+     
     // Send the extracted content to LLM for analysis
     try {
       const result = await generateObject({
