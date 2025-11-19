@@ -293,12 +293,11 @@ async function validateAndImproveSchema(url: string) {
       console.error('Schema validation API error:', response.statusText);
       return null;
     }
-
-    const validationHtml = await response.text();
-
-    // Parse HTML with Cheerio to extract relevant data
-    const $ = load(validationHtml);
+    const text = await response.text();
+    const cleaned = text.replace(/^\)\]\}'\n/, '');
+    const pageData = JSON.parse(cleaned);
     
+    const $ = load(pageData.html);
     // Extract schema information
     const schemaScripts = $('script[type="application/ld+json"]');
     const schemas: string[] = [];
@@ -339,7 +338,7 @@ async function validateAndImproveSchema(url: string) {
       warnings: warnings,
       validationText: validationText.substring(0, 2000)
     };
-
+    
     // Send the extracted content to LLM for analysis
     try {
       const result = await generateObject({
@@ -348,7 +347,7 @@ async function validateAndImproveSchema(url: string) {
           valid: z.boolean().describe("Whether the schema markup is valid"),
           errors: z.number().describe("Number of validation errors found"),
           warnings: z.number().describe("Number of validation warnings found"),
-          currentSchema: z.string().describe("The exact current schema markup found on the page as JSON"),
+          currentSchema: z.string().describe("The exact current schema markup found on the page as JSON with formatted spaces for better readability"),
           improvements: z.array(
             z.string()
           ).describe("List of specific improvements that can be made to the schema markup")
@@ -371,7 +370,7 @@ Extract:
 1. Whether schema is valid (true if no errors, false otherwise)
 2. Count of validation errors
 3. Count of validation warnings
-4. The exact current schema markup as valid JSON (pick the first one if multiple exist)
+4. The exact current schema markup with spaces formatted
 5. A list of 2-3 specific improvements that can be made to enhance the schema
 
 Return the currentSchema as valid, parseable JSON and improvements as specific actionable changes.`
