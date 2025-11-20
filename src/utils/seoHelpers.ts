@@ -1,6 +1,7 @@
 import { generateObject } from 'ai';
 import { bedrock } from '@ai-sdk/amazon-bedrock';
 import { z } from 'zod';
+import * as cheerio from 'cheerio';
 
 const robotsValidationSchema = z.object({
   allowed: z.boolean().describe("Whether the URL is allowed by robots.txt")
@@ -14,38 +15,6 @@ export async function fetchRobotsTxt(baseUrl: string): Promise<string | null> {
     }
   } catch (e) {
     console.error('Error fetching robots.txt:', e);
-  }
-  return null;
-}
-
-export async function discoverSitemap(baseUrl: string): Promise<string | null> {
-  try {
-    const sitemapUrls = [
-      `${baseUrl}/sitemap.xml`,
-      `${baseUrl}/sitemap.txt`,
-      `${baseUrl}/sitemap-index.xml`
-    ];
-
-    for (const sitemapUrl of sitemapUrls) {
-      const response = await fetch(sitemapUrl);
-      if (response.ok) {
-        return sitemapUrl;
-      }
-    }
-  } catch (e) {
-    console.error('Error discovering sitemap:', e);
-  }
-  return null;
-}
-
-export async function fetchSitemapContent(sitemapUrl: string): Promise<string | null> {
-  try {
-    const response = await fetch(sitemapUrl);
-    if (response.ok) {
-      return await response.text();
-    }
-  } catch (e) {
-    console.error('Error fetching sitemap:', e);
   }
   return null;
 }
@@ -73,38 +42,44 @@ Return true if the URL is allowed, false if it's disallowed. Consider all user-a
   }
 }
 
-export async function validateCanonicalTag(html: string | any): Promise<boolean> {
+export async function checkCanonical(url: string): Promise<{
+  exists: boolean;
+  canonicalUrl?: string;
+  selfReferencing?: boolean;
+}> {
   try {
-    const htmlContent = typeof html === 'string' ? html : html.html || '';
-    const markdown = typeof html === 'object' ? html.markdown || '' : '';
-    
-    // Use LLM to analyze if canonical tag exists
-    const result = await generateObject({
-      model: bedrock('global.anthropic.claude-haiku-4-5-20251001-v1:0'),
-      schema: z.object({
-        canonicalExists: z.boolean().describe("Whether a canonical tag exists in the page")
-      }),
-      prompt: `Analyze this HTML and markdown content to determine if a canonical tag exists on the page.
-
-HTML Content:
-${htmlContent.substring(0, 2000)}
-
-Markdown Content:
-${markdown.substring(0, 2000)}
-
-Check for:
-1. <link rel="canonical" href="..."> in the HTML head
-2. Any canonical URL references
-
-Return true if a canonical tag is present, false otherwise.`
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; SEO-Audit-Bot/1.0)',
+      },
     });
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
     
-    return result.object.canonicalExists;
+    // Extract canonical URL
+    const canonicalUrl = $('link[rel="canonical"]').attr('href');
+    
+    if (!canonicalUrl) {
+      return { exists: false };
+    }
+
+    // Normalize URLs for comparison
+    const normalizeUrl = (u: string) => 
+      u.trim().toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .replace(/\/$/, '');
+
+    const isSelfReferencing = normalizeUrl(canonicalUrl) === normalizeUrl(url);
+
+    return {
+      exists: true,
+      canonicalUrl,
+      selfReferencing: isSelfReferencing,
+    };
   } catch (error) {
-    console.error('Error validating canonical tag:', error);
-    // Fallback to regex check
-    const htmlContent = typeof html === 'string' ? html : html.html || '';
-    const canonicalMatch = htmlContent.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
-    return !!canonicalMatch;
+    console.error('Error checking canonical:', error);
+    return { exists: false };
   }
 }

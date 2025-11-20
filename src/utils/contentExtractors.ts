@@ -2,9 +2,9 @@ import { load } from 'cheerio';
 import { generateObject } from 'ai';
 import { bedrock } from '@ai-sdk/amazon-bedrock';
 import { z } from 'zod';
-import { validateCanonicalTag } from './seoHelpers';
+import { checkCanonical } from './seoHelpers';
 
-export function extractTechnicalSeo(html: string, metaData: Record<string, string>, url: string) {
+export async function extractTechnicalSeo(html: string, metaData: Record<string, string>, url: string) {
   const urlObj = new URL(url);
 
   // Sitemap
@@ -21,11 +21,11 @@ export function extractTechnicalSeo(html: string, metaData: Record<string, strin
   };
 
   // Canonical tag
-  const canonicalMatch = validateCanonicalTag(html);
+  const canonicalMatch = await checkCanonical(url)
   const canonicalTag = { 
-    present: !!canonicalMatch,
-    url: undefined
-  };
+    present: canonicalMatch.exists,
+    url: canonicalMatch.canonicalUrl || null
+  }
 
   // Schema markup
   const schemaMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);

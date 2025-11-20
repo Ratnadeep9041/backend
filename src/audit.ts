@@ -1,7 +1,7 @@
 import Firecrawl from "@mendable/firecrawl-js";
 import psi from 'psi';
 import { AuditResponse } from "./types";
-import { fetchRobotsTxt, discoverSitemap, fetchSitemapContent, validateUrlAgainstRobots } from "./utils/seoHelpers"
+import { fetchRobotsTxt, validateUrlAgainstRobots, checkCanonical } from "./utils/seoHelpers"
 import { extractTechnicalSeo, extractLinks, extractImages, validateAndImproveSchema } from "./utils/contentExtractors"
 import { extractAuditImprovementsWithAI, generateOptimizedMeta } from "./utils/aiHelpers"
 
@@ -9,10 +9,37 @@ const firecrawl = new Firecrawl({
   apiKey: process.env.FIRECRAWL_API_KEY || "",
 });
 
+async function checkUrlInSitemap(baseUrl: string, targetUrl: string): Promise<boolean> {
+
+  try {
+    const mapResult = await firecrawl.map(baseUrl, {
+      sitemap: 'only',
+      limit: 1000,
+    });
+
+    if (!mapResult.links) {
+      console.error('Failed to retrieve sitemap');
+      return false;
+    }
+
+
+    return mapResult.links.some((result) => {
+      const url = result.url
+      return url.trim().includes(targetUrl.trim());
+    });
+
+  } catch (error) {
+    console.error('Error checking URL in sitemap:', error);
+    return false;
+  }
+}
+
+
+
+
 export async function auditWebsite(url: string): Promise<AuditResponse> {
   // Run PageSpeed Insights
   const apiKey = process.env.PSI_API_KEY;
-
   const [mobileResults, desktopResults] = await Promise.all([
     psi(url, {
       strategy: 'mobile',
@@ -52,18 +79,11 @@ export async function auditWebsite(url: string): Promise<AuditResponse> {
   // Fetch SEO-related resources
   const urlObj = new URL(url);
   const baseUrl = `${urlObj.protocol}//${urlObj.hostname}`;
+
   const robotsTxtContent = await fetchRobotsTxt(baseUrl);
-  const sitemapUrl = await discoverSitemap(baseUrl);
-  const sitemapContent = sitemapUrl ? await fetchSitemapContent(sitemapUrl) : null;
 
-  // Check if URL is in sitemap
-  let sitemapPresent = false;
-  if (sitemapContent) {
-    const urlObjForSitemap = new URL(url);
-    const pathWithQuery = urlObjForSitemap.pathname + urlObjForSitemap.search;
-    sitemapPresent = sitemapContent.includes(url) || sitemapContent.includes(pathWithQuery);
-  }
-
+  const sitemapPresent = await checkUrlInSitemap(baseUrl, url)
+  console.log({sitemapPresent})
   // Validate URL against robots.txt
   const robotsTextPresent = await validateUrlAgainstRobots(url, robotsTxtContent);
 
@@ -75,7 +95,7 @@ export async function auditWebsite(url: string): Promise<AuditResponse> {
   // Parse HTML for technical SEO
   const html = scrapeResult.html || '';
   const metaData = scrapeResult?.metadata as Record<string, string>;
-  const technical = extractTechnicalSeo(html, metaData, url);
+  const technical = await extractTechnicalSeo(html, metaData, url);
 
   // Extract links and images
   const links = extractLinks(html, url);
@@ -106,7 +126,7 @@ export async function auditWebsite(url: string): Promise<AuditResponse> {
     technical: {
       sitemapPresent: !!sitemapPresent,
       robotsTextPresent: !!robotsTxtContent,
-      canonicalTagPresent: technical.canonicalTag.present,
+      canonicalTag: technical.canonicalTag,
       schemaMarkup: technical.schemaMarkup.types || [],
       schemaValidation: schemaAnalysis,
       statusCodes: {

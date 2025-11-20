@@ -14,7 +14,8 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.18.2",
-    "psi": "^4.1.0"
+    "psi": "^4.1.0",
+    "sitemapper": "^4.0.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
