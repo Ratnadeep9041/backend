@@ -17,7 +17,7 @@ export async function extractAuditImprovementsWithAI(
   mobileAudits: any,
   scores: any
 ) {
-  const processCategory = async (audits: any, categoryName: string) => {
+  const processCategory = async (audits: any, categoryName: string, score: string) => {
     const failingAudits: Array<{ title: string; description: string; displayValue?: string }> = [];
 
     Object.entries(audits).forEach(([auditId, audit]: any) => {
@@ -43,21 +43,21 @@ export async function extractAuditImprovementsWithAI(
       const result = await generateObject({
         model: bedrock('global.anthropic.claude-haiku-4-5-20251001-v1:0'),
         schema: improvementsSchema,
-        prompt: `You are an SEO and web optimization expert. Convert Lighthouse audit findings into simple, actionable improvements that are ONLY relevant to the specified category.
+        prompt: `You are an SEO and performance optimization expert. Analyze the Lighthouse audit findings and return only the most relevant, simple, and actionable improvements for the specified category.  
 
-        Category: ${categoryName}
-        
-        IMPORTANT: Only include improvements that directly relate to the "${categoryName}" category. Ignore any audit findings that are not related to this specific category.
-        
-        Lighthouse Findings:
-        ${auditSummary}
-        
-        Generate 3-5 of the most impactful improvements that apply to ${categoryName}. For each improvement:
-        - Use a clear headline (max 10 words)
-        - Write a simple explanation that a non-technical person can understand
-        - Ensure it's directly relevant to ${categoryName}
-        
-        Discard any findings that fall outside the ${categoryName} scope.`
+Category: ${categoryName}  
+Lighthouse Findings: ${auditSummary}  
+Lighthouse Score: ${score}  
+
+Instructions:  
+- If the SEO score is 100, respond with “No improvements needed.”  
+- Provide only 3–5 of the most impactful improvements related **only** to the given category.  
+- Each improvement must include:  
+  1. A short, clear headline (max 10 words).  
+  2. A one-line, plain-language action step for non-technical users.  
+- Discard or ignore all findings unrelated to the chosen category.  
+- Keep the response concise and directly tied to ${categoryName} and ${score}.   
+        `   
       });
 
       return result.object.improvements.map(imp => `${imp.headline} - ${imp.description}`);
@@ -68,10 +68,10 @@ export async function extractAuditImprovementsWithAI(
   };
 
   const [performance, accessibility, seo, bestPractices] = await Promise.all([
-    processCategory(desktopAudits, 'Performance'),
-    processCategory(desktopAudits, 'Accessibility'),
-    processCategory(desktopAudits, 'SEO'),
-    processCategory(desktopAudits, 'Best Practices')
+    processCategory(desktopAudits, 'Performance', scores.performanceScore),
+    processCategory(desktopAudits, 'Accessibility', scores.accessibilityScore),
+    processCategory(desktopAudits, 'SEO', scores.seoScore),
+    processCategory(desktopAudits, 'Best Practices', scores.bestPracticesScore)
   ]);
   
   return { performance, accessibility, seo, bestPractices };

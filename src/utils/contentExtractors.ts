@@ -236,7 +236,7 @@ Extract:
 3. Count of validation warnings
 4. The exact current schema markup with spaces formatted
 5. A list of 2-3 specific improvements that can be made to enhance the schema
-
+6. If schema does not exist tell specifically to ada a schema to the user website
 Return the currentSchema as valid, parseable JSON and improvements as specific actionable changes.`
       });
 
@@ -244,7 +244,7 @@ Return the currentSchema as valid, parseable JSON and improvements as specific a
         valid: result.object.valid,
         errors: result.object.errors,
         warnings: result.object.warnings,
-        currentSchema: schemas.join("/n/n"),
+        currentSchema: schemas,
         improvements: result.object.improvements
       };
     } catch (llmError) {

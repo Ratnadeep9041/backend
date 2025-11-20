@@ -104,7 +104,7 @@ export async function auditWebsite(url: string): Promise<AuditResponse> {
     url,
     timestamp: new Date().toISOString(),
     technical: {
-      sitemapPresent: !!sitemapUrl,
+      sitemapPresent: !!sitemapPresent,
       robotsTextPresent: !!robotsTxtContent,
       canonicalTagPresent: technical.canonicalTag.present,
       schemaMarkup: technical.schemaMarkup.types || [],

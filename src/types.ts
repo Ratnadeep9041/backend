@@ -14,7 +14,7 @@ export interface AuditRequest {
         valid: boolean
         errors: number
         warnings: number
-        currentSchema: string
+        currentSchema: string[]
         improvements: string[]
       } | null
       statusCodes: {
