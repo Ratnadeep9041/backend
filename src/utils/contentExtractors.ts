@@ -4,6 +4,47 @@ import { bedrock } from '@ai-sdk/amazon-bedrock';
 import { z } from 'zod';
 import { checkCanonical } from './seoHelpers';
 
+
+async function fixJSON(content: string): Promise<string> {
+  const result = await generateObject({
+    model: bedrock('global.anthropic.claude-haiku-4-5-20251001-v1:0'),
+    schema: z.object({
+      fixedData: z.object({}).passthrough()
+    }),
+    prompt: `Fix this JSON data while keeping it 99% identical to the original. Only fix syntax errors like missing commas, trailing commas, mismatched brackets, incorrect quotes, unclosed strings, duplicate keys, and missing colons.
+
+JSON to fix:
+${content}
+
+Return only the fixed JSON data.`
+  });
+  console.log({data:result.object.fixedData})
+  return JSON.stringify(result.object.fixedData);
+}
+
+async function extractSchemas(pageData: string): Promise<string[]> {
+  const schemas: string[] = [];
+  const $ = load(pageData);
+  const schemaScripts = $('script[type="application/ld+json"]');
+
+  for (let i = 0; i < schemaScripts.length; i++) {
+    const elem = schemaScripts[i];
+    const content = $(elem).html();
+
+    if (content) {
+      try {
+        JSON.parse(content);
+        schemas.push(content)
+      } catch (error) {
+        const processed = await fixJSON(content);
+        schemas.push(processed);
+      }
+      
+    }
+  }
+  return schemas
+}
+
 export async function extractTechnicalSeo(html: string, metaData: Record<string, string>, url: string) {
   const urlObj = new URL(url);
 
@@ -166,15 +207,7 @@ export async function validateAndImproveSchema(url: string) {
     
     const $ = load(pageData.html);
     
-    // Extract schema information
-    const schemaScripts = $('script[type="application/ld+json"]');
-    const schemas: string[] = [];
-    schemaScripts.each((i, elem) => {
-      const content = $(elem).html();
-      if (content) {
-        schemas.push(content);
-      }
-    });
+   const schemas = await extractSchemas(pageData.html as string)
     console.log({schema:schemas.length})
     // Extract error and warning messages
     const errors: string[] = [];
@@ -211,7 +244,6 @@ export async function validateAndImproveSchema(url: string) {
           valid: z.boolean().describe("Whether the schema markup is valid"),
           errors: z.number().describe("Number of validation errors found"),
           warnings: z.number().describe("Number of validation warnings found"),
-          currentSchema: z.string().describe("The exact current schema markup found on the page as JSON with formatted spaces for better readability"),
           improvements: z.array(
             z.string()
           ).describe("List of specific improvements that can be made to the schema markup")
